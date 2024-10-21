@@ -34,9 +34,9 @@ class KNN_Imputer():
             squared_distance = np.sum((row1[mask] - row2[mask]) ** 2)
             weight = total_coordinates / valid_count
             distance = np.sqrt(weight * squared_distance)
-        # else:
-        #     # normalized distance
-        #     distance = np.sqrt(np.sum((row1[mask] - row2[mask]) ** 2) / valid_count)
+        else:
+            # normalized distance
+            distance = np.sqrt(np.sum((row1[mask] - row2[mask]) ** 2) / valid_count)
 
         return distance
 
@@ -68,5 +68,3 @@ class KNN_Imputer():
                     final_data[i][j] = X_imputed[i][j]
 
         return final_data
-
-

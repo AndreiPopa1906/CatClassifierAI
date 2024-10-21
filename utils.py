@@ -24,29 +24,45 @@ def nearest_neighbour(X, k=5):
 
 def SMOTE(X, num_samples):
     """
-    Generate synthetic samples using SMOTE technique.
+    Generate synthetic samples using SMOTE technique by interpolating between a sample
+    and one of its nearest neighbors.
 
     Parameters:
     - X: np.array, feature set for the class
     - num_samples: number of synthetic samples to generate
 
-    Returns:
+    Returns:  -
     - synthetic_samples: np.array, the generated synthetic samples
     """
-    indices2 = nearest_neighbour(X)
+    # Find the k-nearest neighbors for each point in X
+    k = min(5, len(X))
+
+    # You can change this number of neighbors based on your requirement
+    neighbors = NearestNeighbors(n_neighbors=k).fit(X)
+
+    # Get the indices of the k-nearest neighbors
+    indices = neighbors.kneighbors(X, return_distance=False)
+
     synthetic_samples = []
 
+    # Generate synthetic samples
     for _ in range(num_samples):
-        idx = random.randint(0, len(X) - 1)
-        t = X[indices2[idx]]
-        new_sample = []
+        # Randomly select a sample from the original dataset
+        sample_idx = random.randint(0, len(X) - 1)
+        sample = X[sample_idx]
 
-        for j in range(X.shape[1]):
-            new_sample.append(random.choice(t[:, j]))
+        # Randomly select one of the k-nearest neighbors
+        neighbor_idx = random.choice(indices[sample_idx][1:])  # Avoid selecting the point itself
+        neighbor = X[neighbor_idx]
 
-        synthetic_samples.append(new_sample)
+        # Generate a synthetic sample by linear interpolation between sample and neighbor
+        gap = np.random.rand()  # Random number between 0 and 1
+        synthetic_sample = sample + gap * (neighbor - sample)  # Interpolating
+
+        synthetic_samples.append(synthetic_sample)
 
     return np.array(synthetic_samples)
+
 
 def balance_classes(X, y):
     """
@@ -61,6 +77,7 @@ def balance_classes(X, y):
     - X_balanced: np.array, balanced feature matrix
     - y_balanced: np.array, balanced label vector
     """
+
     unique_classes, class_counts = np.unique(y, return_counts=True)
     max_count = np.max(class_counts)
 
