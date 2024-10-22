@@ -2,54 +2,6 @@ import pandas as pd
 import numpy as np
 from knn_imputer import KNN_Imputer
 from utils import SMOTE, balance_classes
-
-
-
-# def load_and_preprocess(file_path, output_file_path):
-#     df = pd.read_excel(file_path)
-#
-#     # Drop unnecessary columns
-#     y = df['Race'].values
-#     X = df.drop(columns=['Race', 'Horodateur'])
-#
-#     # 'F' -> 1, 'M' -> 0, 'NSP' -> NaN
-#     X['Sexe'] = X['Sexe'].replace({'F': 1, 'M': 0, 'NSP': np.nan})
-#
-#     # One-hot encode
-#     X_encoded = pd.get_dummies(X.drop(columns=['Sexe']))
-#     X_encoded['Sexe'] = X['Sexe']
-#
-#     # Handle missing values using KNN imputer
-#     if X_encoded.isnull().values.any():
-#         knn_imputer = KNN_Imputer(k=5)
-#         knn_imputer.fit(X_encoded.values)
-#         X_imputed = knn_imputer.predict()
-#         X_encoded = pd.DataFrame(X_imputed, columns=X_encoded.columns)
-#
-#     # Replace True/False with 1/0
-#     X_encoded = X_encoded.replace({True: 1, False: 0})
-#
-#     # Convert to numpy array
-#     X_encoded = X_encoded.values
-#
-#     # Balance the classes
-#     X_balanced, y_balanced = balance_classes(X_encoded, y)
-#
-#     # Round all numerical values to the nearest integer
-#     X_balanced = np.round(X_balanced)
-#
-#     # Create DataFrames for balanced data
-#     X_balanced_df = pd.DataFrame(X_balanced, columns=pd.get_dummies(X.drop(columns=['Sexe'])).columns.tolist() + ['Sexe'])
-#     y_balanced_df = pd.DataFrame(y_balanced, columns=['Race'])
-#
-#     # Concatenate the balanced features and target
-#     balanced_df = pd.concat([X_balanced_df, y_balanced_df], axis=1)
-#
-#     # Save the modified dataset to an Excel file
-#     balanced_df.to_excel(output_file_path, index=False)
-#
-#     return X_balanced, y_balanced
-
 def load_and_preprocess(file_path, output_file_path):
     df = pd.read_excel(file_path)
 
