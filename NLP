@@ -1,0 +1,485 @@
+import sys
+import os
+import random
+import time
+from googletrans import Translator
+import nltk
+from nltk.corpus import wordnet as wn
+from langdetect import detect
+import re
+from collections import Counter
+import spacy
+from sklearn.feature_extraction.text import TfidfVectorizer
+import matplotlib.pyplot as plt
+from nltk.probability import FreqDist
+import requests
+import asyncio
+
+nltk.data.path.append(r'C:\Users\matei\AppData\Roaming\nltk_data\tokenizers\punkt')
+nltk.download('punkt', quiet=True)
+nltk.download('wordnet', quiet=True)
+nltk.download('omw-1.4', quiet=True)
+translator = Translator()
+
+LANGUAGE_CONFIG = {
+    'en': {
+        'spacy_model': 'en_core_web_md',
+        'stop_words_lang': 'english',
+        'wordnet_lang': 'eng',
+        'sentence_lang': 'english',
+        'synset_lang': 'eng',
+        'pos_map': {
+            'ADJ': wn.ADJ,
+            'NOUN': wn.NOUN,
+            'VERB': wn.VERB,
+            'ADV': wn.ADV
+        },
+        'templates': [
+            "The term '{keyword}' is important in the context.",
+            "This paragraph highlights the use of the word '{keyword}'.",
+            "The word '{keyword}' plays a crucial role in understanding the text.",
+            "In this text, '{keyword}' is used to emphasize a key point."
+        ]
+    },
+    'ro': {
+        'spacy_model': 'ro_core_news_md',
+        'stop_words_lang': 'romanian',
+        'wordnet_lang': 'ron',
+        'sentence_lang': 'romanian',
+        'synset_lang': 'ron',
+        'pos_map': {
+            'ADJ': wn.ADJ,
+            'NOUN': wn.NOUN,
+            'VERB': wn.VERB,
+            'ADV': wn.ADV
+        },
+        'templates': [
+            "Termenul '{keyword}' este important în acest context.",
+            "Acest paragraf evidențiază utilizarea cuvântului '{keyword}'.",
+            "Cuvântul '{keyword}' joacă un rol crucial în înțelegerea textului.",
+            "În acest text, '{keyword}' este folosit pentru a sublinia un punct esențial."
+        ]
+    }
+}
+
+# -------------------------------------------------------------------
+# 1) READING THE TEXT
+# -------------------------------------------------------------------
+
+def read_text():
+    """
+    Reads input text from a file if '--file' flag is used,
+    otherwise reads from standard input.
+    """
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--file":
+            if len(sys.argv) < 3:
+                raise ValueError("Filename not provided after '--file' flag.")
+            filename = sys.argv[2]
+            if os.path.isfile(filename):
+                with open(filename, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    print(f"Read content from file: {len(content)} characters.")
+                    return content
+            else:
+                raise ValueError(f"File '{filename}' not found.")
+        else:
+            text = " ".join(sys.argv[1:])
+            print(f"Read text from command line: {len(text)} characters.")
+            return text
+    else:
+        text = input("Enter your text: ")
+        print(f"Read text from input: {len(text)} characters.")
+        print(f"Raw input received: '{text}'")
+        return text
+
+# -------------------------------------------------------------------
+# 2) DETECTING THE LANGUAGE
+# -------------------------------------------------------------------
+def detect_language_text(text: str) -> str:
+    """
+    Detects the language of the input text using langdetect.
+    Defaults to English if detection fails or language is unsupported.
+    """
+    print(f"Text for language detection: '{text[:60]}...'")
+    try:
+        lang = detect(text)
+        if lang not in LANGUAGE_CONFIG:
+            print(f"Detected language '{lang}' is not supported. Translating to English.")
+            return 'en_translate'
+        else:
+            print(f"Language detected: '{lang}'")
+            return lang
+    except Exception as e:
+        print("Could not detect language. Translating to English.")
+        print(f"Exception: {e}")
+        return 'en_translate'
+
+
+def load_spacy_model(lang: str):
+    """
+    Loads the appropriate spaCy model based on detected language.
+    Exits the script if the model is not found.
+    """
+    if lang == 'en_translate':
+        lang = 'en'
+    model_name = LANGUAGE_CONFIG[lang]['spacy_model']
+    try:
+        print(f"Loading spaCy model: '{model_name}'")
+        nlp = spacy.load(model_name)
+        return nlp
+    except Exception as e:
+        print(f"Ensure spaCy and '{model_name}' are installed.")
+        print(f"Install it using: python -m spacy download {model_name}")
+        print(f"Exception: {e}")
+        sys.exit(1)
+
+
+# -------------------------------------------------------------------
+# 1) STYLOMETRIC ANALYSIS
+# -------------------------------------------------------------------
+
+def show_stylometric_info(text: str, nlp, lang: str):
+    """
+    Analyzes the text using spaCy and displays stylometric information.
+    """
+    print("Analyzing text...")
+    doc = nlp(text)
+
+    words = [token.text for token in doc if token.is_alpha]
+    sentences = [sent.text for sent in doc.sents]
+
+    print(f"Number of words: {len(words)}")
+    print(f"Number of characters (including spaces): {len(text)}")
+    print(f"Number of sentences: {len(sentences)}")
+
+    freq = Counter(words)
+    print("Top 10 most frequent words:")
+    for word, count in freq.most_common(10):
+        print(f"  {word}: {count} occurrences")
+
+
+# -------------------------------------------------------------------
+# 3) ALTERNATIVE TEXT
+# -------------------------------------------------------------------
+def build_synonyms_dict(words, lang):
+    """
+    Builds a synonyms dictionary for the given list of words and language,
+    including confidence scores.
+    """
+    synonyms_dict = {}
+    wordnet_lang = LANGUAGE_CONFIG[lang]['synset_lang']
+    max_synonyms = 10
+
+    for word in words:
+        base_word = word.lower()
+        if base_word in synonyms_dict:
+            continue
+
+        synonyms = set()
+        synsets = wn.synsets(word, lang=wordnet_lang)
+        for syn in synsets:
+            for lemma in syn.lemmas(lang=wordnet_lang):
+                synonym = lemma.name().replace('_', ' ')
+                if synonym.lower() != base_word and ' ' not in synonym:
+                    synonyms.add(synonym)
+        if synonyms:
+            confidence = min(len(synonyms) / max_synonyms, 3.0)
+            synonyms_dict[base_word] = {
+                "synonyms": list(synonyms),
+                "confidence": confidence
+            }
+
+    return synonyms_dict
+
+
+def get_datamuse_synonyms(word, lang='en'):
+    """
+    Fetches synonyms for a word using the Datamuse API.
+    """
+    try:
+        params = {'rel_syn': word, 'max': 10}
+        response = requests.get('https://api.datamuse.com/words', params=params)
+        if response.status_code == 200:
+            synonyms = response.json()
+            return [syn['word'] for syn in synonyms if 'word' in syn and ' ' not in syn['word']]
+    except Exception as e:
+        print(f"Datamuse API request failed for '{word}': {e}")
+    return []
+
+
+def get_random_synonym(word, synonyms_dict, lang='en'):
+    """
+    Returns a random synonym for `word` if found in `synonyms_dict`.
+    Ensures we don't return the exact same word and avoids multi-word synonyms.
+    Utilizes Datamuse API as a fallback if no synonyms are found in synonyms_dict.
+    """
+    base_word = word.lower()
+    if base_word in synonyms_dict and len(synonyms_dict[base_word]["synonyms"]) > 0:
+        possible_syns = synonyms_dict[base_word]["synonyms"]
+        filtered = [s for s in possible_syns if s.lower() != base_word and ' ' not in s]
+        if filtered:
+            return random.choice(filtered)
+
+    datamuse_synonyms = get_datamuse_synonyms(word, lang)
+    if datamuse_synonyms:
+        return random.choice(datamuse_synonyms)
+
+    return word
+
+
+def get_hypernym(word, lang, pos):
+    """
+    Retrieves a hypernym for a given word based on its POS.
+    """
+    wordnet_lang = LANGUAGE_CONFIG[lang]['synset_lang']
+    pos_tag = LANGUAGE_CONFIG[lang]['pos_map'].get(pos, wn.NOUN)
+
+    synsets = wn.synsets(word, lang=wordnet_lang, pos=pos_tag)
+    if not synsets:
+        return None
+
+    hypernyms = set()
+    for syn in synsets:
+        for hyper in syn.hypernyms():
+            for lemma in hyper.lemmas(lang=wordnet_lang):
+                hypernym = lemma.name().replace('_', ' ')
+                if ' ' not in hypernym:
+                    hypernyms.add(hypernym)
+    if hypernyms:
+        return random.choice(list(hypernyms))
+    return None
+
+
+def get_antonym(word, lang, pos):
+    """
+    Retrieves an antonym for a given word based on its POS.
+    """
+    wordnet_lang = LANGUAGE_CONFIG[lang]['synset_lang']
+    pos_tag = LANGUAGE_CONFIG[lang]['pos_map'].get(pos, wn.ADJ)
+
+    synsets = wn.synsets(word, lang=wordnet_lang, pos=pos_tag)
+    if not synsets:
+        return None
+
+    antonyms = set()
+    for syn in synsets:
+        for lemma in syn.lemmas(lang=wordnet_lang):
+            for ant in lemma.antonyms():
+                antonym = ant.name().replace('_', ' ')
+                if ' ' not in antonym:
+                    antonyms.add(antonym)
+    if antonyms:
+        return random.choice(list(antonyms))
+    return None
+
+
+def replace_words_with_synonyms(doc, synonyms_dict, lang, percentage=0.2):
+    """
+    Replaces a percentage of words in the doc with their synonyms, hypernyms, or antonyms
+    based on confidence rates provided in synonyms_dict.
+
+    Parameters:
+    - doc: spaCy Doc object.
+    - synonyms_dict: Dictionary with words as keys and dictionaries containing
+                     synonyms and confidence scores as values.
+                     Example:
+                     {
+                         "happy": {"synonyms": ["joyful", "content"], "confidence": 0.95},
+                         "sad": {"synonyms": ["unhappy", "sorrowful"], "confidence": 0.85},
+                         # ...
+                     }
+    - lang: Language code (e.g., 'en').
+    - percentage: Fraction of eligible words to replace (default is 20%).
+
+    Returns:
+    - Modified text with selected words replaced.
+    """
+    eligible_words = [
+        (token.text, synonyms_dict.get(token.text.lower(), {}).get("confidence", 0))
+        for token in doc
+        if token.is_alpha and not token.is_stop and token.text.lower() in synonyms_dict
+    ]
+
+    if not eligible_words:
+        print("No eligible words found for replacement.")
+        return doc.text
+
+    eligible_words_sorted = sorted(eligible_words, key=lambda x: x[1], reverse=True)
+
+    total_words = len(eligible_words_sorted)
+    num_to_replace = max(1, int(total_words * percentage))
+
+    words_to_replace = [word for word, conf in eligible_words_sorted[:num_to_replace]]
+
+    print(f"Words to potentially replace ({num_to_replace}): {words_to_replace}")
+
+    replace_set = set([w.lower() for w in words_to_replace])
+
+    new_words = []
+    for token in doc:
+        word = token.text
+        if token.is_alpha and not token.is_stop and word.lower() in replace_set:
+            pos = token.pos_
+            synonym = get_random_synonym(word, synonyms_dict, lang)
+            if synonym and synonym.lower() != word.lower():
+                replacement = synonym
+                replacement_type = "synonym"
+            else:
+                hypernym = get_hypernym(word, lang, pos)
+                if hypernym and hypernym.lower() != word.lower():
+                    replacement = hypernym
+                    replacement_type = "hypernym"
+                else:
+                    antonym = get_antonym(word, lang, pos)
+                    if antonym and antonym.lower() != word.lower():
+                        replacement = antonym
+                        replacement_type = "antonym"
+                    else:
+                        replacement = word
+                        replacement_type = "none"
+
+            if replacement != word:
+                if word[0].isupper():
+                    replacement = replacement.capitalize()
+                print(f"word '{word}' -> '{replacement}' ({replacement_type})")
+                new_words.append(replacement)
+            else:
+                print(f"No suitable replacement found for '{word}'. Keeping the original word.")
+                new_words.append(word)
+        else:
+            new_words.append(word)
+
+    return ' '.join(new_words)
+
+# -------------------------------------------------------------------
+# 4) EXTRACTING KEYWORDS
+# -------------------------------------------------------------------
+def extract_keywords_tfidf(text: str, lang: str, top_n=5):
+    """
+    Extracts top N keywords from the text using TF-IDF vectorization.
+    """
+    try:
+        if lang in ['ro', 'en']:
+            print(f"{LANGUAGE_CONFIG[lang]['sentence_lang'].capitalize()} selected.")
+            nlp = spacy.load(LANGUAGE_CONFIG[lang]['spacy_model'])
+            stop_words = sorted([word for word in nlp.Defaults.stop_words if word.isalpha()])
+            print("Stop words loaded.")
+        else:
+            stop_words = 'english'
+
+        vectorizer = TfidfVectorizer(stop_words=stop_words)
+        X = vectorizer.fit_transform([text])
+        print("TF-IDF matrix shape:", X.shape)
+
+        if X.shape[1] == 0:
+            print("Empty vocabulary; perhaps the documents only contain stop words.")
+            return []
+
+        tfidf_scores = sorted(
+            zip(vectorizer.get_feature_names_out(), X.toarray()[0]),
+            key=lambda x: -x[1]
+        )
+        return [word for word, score in tfidf_scores[:top_n]]
+    except Exception as e:
+        print("Error in extract_keywords_tfidf:", str(e))
+        raise
+
+# -------------------------------------------------------------------
+# 5) GENERATING SENTENCES FOR KEYWORHS
+# -------------------------------------------------------------------
+def generate_sentence_for_keyword(keyword: str, lang: str):
+    """
+    Generates a sentence illustrating the meaning of the keyword in the target language.
+    """
+    synsets = wn.synsets(keyword, lang=LANGUAGE_CONFIG[lang]['synset_lang'])
+    if synsets:
+        primary_synset = synsets[0]
+        print(f"Primary synset for '{keyword}': {primary_synset}")
+        definition = primary_synset.definition()
+        print(f"Definition: {definition}")
+        related_nouns = wn.synsets(keyword, pos=wn.NOUN)
+        print(f"Related nouns for '{keyword}': {related_nouns}")
+        example = primary_synset.examples()
+
+        if example:
+            sentence = f"Example: {example[0]}"
+        else:
+            sentence = f"Illustration: {definition}"
+    else:
+        sentence = f"The word '{keyword}' refers to a concept that is widely recognized in daily language."
+
+    return sentence
+
+
+async def translate_text(text: str, src_lang: str, dest_lang: str) -> str:
+    """
+    Asynchronously translates text from src_lang to dest_lang using Google Translate.
+    """
+    try:
+        translated = await translator.translate(text, src=src_lang, dest=dest_lang)
+        print(f"Translated text from '{src_lang}' to '{dest_lang}'.")
+        return translated.text
+    except Exception as e:
+        print(f"Translation failed: {e}")
+        return text
+
+
+async def main():
+    try:
+        text = read_text()
+        if not text.strip():
+            print("No text provided.")
+            sys.exit(1)
+        lang = detect_language_text(text)
+        print(f"Detected language: '{lang}'")
+
+        # -------------------------------------------------------------------
+        # 1) BONUS
+        # -------------------------------------------------------------------
+        if lang == 'ro':
+            translated_text = await translate_text(text, src_lang='ro', dest_lang='en')
+            lang = 'en'
+            print(f"Language set to English after translation.")
+        elif lang not in LANGUAGE_CONFIG:
+            translated_text = await translate_text(text, src_lang=lang, dest_lang='en')
+            lang = 'en'
+            print(f"Language set to English after translation.")
+        else:
+            translated_text = text
+
+        nlp = load_spacy_model(lang)
+
+        if lang != 'ro':
+            print(
+                f"Note: The input text is in {lang.upper()}. It has been translated to English for processing."
+            )
+
+        show_stylometric_info(translated_text, nlp, lang)
+        doc = nlp(translated_text)
+        eligible_words = [token.text for token in doc if token.is_alpha and not token.is_stop]
+        synonyms_dict = build_synonyms_dict(eligible_words, lang)
+        alt_text = replace_words_with_synonyms(doc, synonyms_dict, lang, percentage=0.5)
+        print("\nAlternative text:", alt_text)
+
+        keywords = extract_keywords_tfidf(translated_text, lang)
+        print("\nKeywords:", keywords)
+
+        if not keywords:
+            print("No keywords extracted.")
+        else:
+            print("\nGenerated Sentences for Keywords:")
+            for keyword in keywords:
+                sentence = generate_sentence_for_keyword(keyword, lang)
+                print(f" - {sentence}")
+    except ValueError as e:
+        print(str(e))
+        sys.exit(1)
+    except Exception as e:
+        print(str(e))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    random.seed(42)
+    asyncio.run(main())
