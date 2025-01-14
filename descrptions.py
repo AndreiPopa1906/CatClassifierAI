@@ -11,7 +11,7 @@ import re
 # Path to the Excel file
 dataset_path = "./Final5_CatDataset.xlsx"
 sheet_name = "Sheet1"
-dataset_path2=r"C:\Users\matei\Downloads\RE7_modified_cat_database.xlsx"
+dataset_path2=r"./RE7_modified_cat_database.xlsx"
 sheet2_name="Code"
 race1 = "Bengal"
 race2="Ragdoll"
